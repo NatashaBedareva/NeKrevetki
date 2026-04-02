@@ -75,6 +75,11 @@ if __name__ == '__main__':
             # Обработка изображения детектором
             detector.process_image(processed_img, draw_boxes=False)
 
+            all_points_eye, all_points_shoulders =detector.get_keypoints_by_indices(processed_img, indices=[3,4,5,6])
+            signal_person = detector.analyze_slouch(all_points_eye, all_points_shoulders)
+            if len(signal_person) != 0:
+                detector.signal(signal_person)
+
             if fps_res > 0:
                 cv2.putText(processed_img, f"FPS: {fps_res:.1f}", (10, 30), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
