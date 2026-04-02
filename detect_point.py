@@ -2,6 +2,7 @@ from ultralytics import YOLO
 import cv2
 import numpy as np
 import os
+import winsound
 
 class YOLOPoseDetector:
     """
@@ -32,7 +33,81 @@ class YOLOPoseDetector:
         """
         self.model = YOLO(model_path)
         self.confidence_threshold = confidence_threshold
+    def get_keypoints_by_indices(self, image, indices=[3,4,5,6]):
+        """
+        Получение координат указанных ключевых точек
         
+        Параметры:
+            image: изображение
+            indices: список индексов точек
+            draw: рисовать ли точки на изображении
+        
+        Возвращает:
+            list: список словарей с координатами для каждого человека
+        """
+        results = self.model(image)[0]
+        points_eye = []
+        points_shoulders = []
+        all_points_eye = []
+        all_points_shoulders = []
+        
+        if (hasattr(results, 'keypoints') and results.keypoints is not None):
+            keypoints = results.keypoints.data.cpu().numpy()
+            confs = results.keypoints.conf.cpu().numpy()
+            
+            for person_idx, (kp, conf_arr) in enumerate(zip(keypoints, confs)):
+                person_eye = {'person_id': person_idx, 'left_eye': None, 'right_eye': None}
+                person_shoulders = {'person_id': person_idx, 'left_shoulder': None, 'right_shoulder': None}
+                
+                for idx in indices:
+                    if idx < len(kp) and conf_arr[idx] > self.confidence_threshold:
+                        x, y = int(kp[idx][0]), int(kp[idx][1])
+
+                        if idx == 3:  # левый глаз
+                            person_eye['left_eye'] = (x, y, conf_arr[idx])
+                        elif idx == 4:  # правый глаз
+                            person_eye['right_eye'] = (x, y, conf_arr[idx])
+                        elif idx == 5:  # левое плечо
+                            person_shoulders['left_shoulder'] = (x, y, conf_arr[idx])
+                        elif idx == 6:  # правое плечо
+                            person_shoulders['right_shoulder'] = (x, y, conf_arr[idx])
+                        
+                all_points_eye.append(person_eye)
+                all_points_shoulders.append(person_shoulders)
+                
+            return all_points_eye,all_points_shoulders
+                    
+                
+        
+        return  points_eye,points_shoulders
+    def analyze_slouch(self, all_points_eye,all_points_shoulders):
+        len_all_points_eye = len(all_points_eye)
+        len_all_points_shoulders = len(all_points_shoulders)
+        signal_person = []
+        for idx in range(len_all_points_eye):
+            if (all_points_eye[idx].get('left_eye') is not None and all_points_eye[idx].get('right_eye') is not None):
+                y1 = (all_points_eye[idx].get('left_eye')[1])
+                y2 = (all_points_eye[idx].get('right_eye')[1])
+                
+                if (abs(y1 - y2)) > 40:
+                    signal_person.append((idx,'eye'))
+        for idx in range(len_all_points_shoulders):
+            if (all_points_shoulders[idx].get('left_shoulder') is not None and all_points_shoulders[idx].get('right_shoulder') is not None):
+                y1 = (all_points_shoulders[idx].get('left_shoulder')[1])
+                y2 = (all_points_shoulders[idx].get('right_shoulder')[1])
+                
+                if (abs(y1 - y2)) > 40:
+                    signal_person.append((idx,'shoulder'))
+        return signal_person
+    
+    def signal(self,signal_person):
+        
+        frequency = 250
+        duration = 1000
+        winsound.Beep(frequency, duration)
+        return
+
+ 
     def draw_skeleton(self, image, keypoints, confs, pairs, color):
         """
         Рисование скелета по заданным парам ключевых точек
@@ -142,7 +217,8 @@ class YOLOPoseDetector:
             cv2.destroyAllWindows()
         
         return image
-
+    
+                
 
 if __name__ == "__main__":
  
