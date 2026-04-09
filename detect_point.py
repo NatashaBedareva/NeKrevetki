@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import os
 import winsound
-import logging  # Добавлен импорт
+import logging
 
 class YOLOPoseDetector:
     """
@@ -14,7 +14,9 @@ class YOLOPoseDetector:
     COLORS = {
         'white': (255, 255, 255),
         'red': (0, 0, 255),
-        'blue': (255, 0, 0)
+        'blue': (255, 0, 0),
+        'green': (0, 255, 0),
+        'yellow': (0, 255, 255)
     }
     
     # Пары ключевых точек для рисования скелета
@@ -39,6 +41,10 @@ class YOLOPoseDetector:
         # Загружаем модель с отключенным выводом
         self.model = YOLO(model_path, verbose=False)
         self.confidence_threshold = confidence_threshold
+        
+        # Для хранения состояния наклона
+        self.eye_tilt_detected = False
+        self.shoulder_tilt_detected = False
     
     def get_keypoints_by_indices(self, image, indices=[3,4,5,6]):
         """
@@ -58,13 +64,30 @@ class YOLOPoseDetector:
         all_points_eye = []
         all_points_shoulders = []
         
-        if (hasattr(results, 'keypoints') and results.keypoints is not None):
+        if (hasattr(results, 'keypoints') and results.keypoints is not None and
+            hasattr(results, 'boxes') and results.boxes is not None):
+            
             keypoints = results.keypoints.data.cpu().numpy()
             confs = results.keypoints.conf.cpu().numpy()
+            boxes = results.boxes.xyxy.cpu().numpy()
             
-            for person_idx, (kp, conf_arr) in enumerate(zip(keypoints, confs)):
-                person_eye = {'person_id': person_idx, 'left_eye': None, 'right_eye': None}
-                person_shoulders = {'person_id': person_idx, 'left_shoulder': None, 'right_shoulder': None}
+            if len(keypoints) > 0 and len(boxes) > 0:
+                # Находим самого крупного человека
+                max_area = 0
+                best_idx = 0
+                
+                for i, box in enumerate(boxes):
+                    area = (box[2] - box[0]) * (box[3] - box[1])
+                    if area > max_area:
+                        max_area = area
+                        best_idx = i
+                
+                # Берем только самого крупного человека
+                kp = keypoints[best_idx]
+                conf_arr = confs[best_idx]
+                
+                person_eye = {'person_id': best_idx, 'left_eye': None, 'right_eye': None}
+                person_shoulders = {'person_id': best_idx, 'left_shoulder': None, 'right_shoulder': None}
                 
                 for idx in indices:
                     if idx < len(kp) and conf_arr[idx] > self.confidence_threshold:
@@ -86,42 +109,142 @@ class YOLOPoseDetector:
         
         return points_eye, points_shoulders
     
+    def draw_eye_line(self, image, person_eye, color):
+        """
+        Рисование линии между глазами
+        
+        Args:
+            image: изображение
+            person_eye: словарь с координатами глаз
+            color: цвет линии
+        """
+        if (person_eye.get('left_eye') is not None and 
+            person_eye.get('right_eye') is not None):
+            
+            x1, y1 = person_eye['left_eye'][0], person_eye['left_eye'][1]
+            x2, y2 = person_eye['right_eye'][0], person_eye['right_eye'][1]
+            
+            # Рисуем линию между глазами
+            cv2.line(image, (x1, y1), (x2, y2), color, 3)
+            
+            # Добавляем подпись с разницей высот
+            diff = abs(y1 - y2)
+            mid_x = (x1 + x2) // 2
+            mid_y = (y1 + y2) // 2
+            cv2.putText(image, f"{diff:.0f}px", (mid_x - 30, mid_y - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    
+    def draw_shoulder_line(self, image, person_shoulders, color):
+        """
+        Рисование линии между плечами
+        
+        Args:
+            image: изображение
+            person_shoulders: словарь с координатами плеч
+            color: цвет линии
+        """
+        if (person_shoulders.get('left_shoulder') is not None and 
+            person_shoulders.get('right_shoulder') is not None):
+            
+            x1, y1 = person_shoulders['left_shoulder'][0], person_shoulders['left_shoulder'][1]
+            x2, y2 = person_shoulders['right_shoulder'][0], person_shoulders['right_shoulder'][1]
+            
+            # Рисуем линию между плечами
+            cv2.line(image, (x1, y1), (x2, y2), color, 3)
+            
+            # Добавляем подпись с разницей высот
+            diff = abs(y1 - y2)
+            mid_x = (x1 + x2) // 2
+            mid_y = (y1 + y2) // 2
+            cv2.putText(image, f"{diff:.0f}px", (mid_x - 30, mid_y - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    
     def analyze_slouch(self, all_points_eye, all_points_shoulders):
+        """
+        Анализ наклона и возврат списка нарушений
+        """
         len_all_points_eye = len(all_points_eye)
         len_all_points_shoulders = len(all_points_shoulders)
         signal_person = []
+        
+        # Сбрасываем флаги
+        self.eye_tilt_detected = False
+        self.shoulder_tilt_detected = False
+        
+        # Анализ глаз
         for idx in range(len_all_points_eye):
-            if (all_points_eye[idx].get('left_eye') is not None and all_points_eye[idx].get('right_eye') is not None):
-                y1 = (all_points_eye[idx].get('left_eye')[1])
-                y2 = (all_points_eye[idx].get('right_eye')[1])
+            if (all_points_eye[idx].get('left_eye') is not None and 
+                all_points_eye[idx].get('right_eye') is not None):
                 
-                if (abs(y1 - y2)) > 40:
-                    signal_person.append((idx,'eye'))
+                y1 = all_points_eye[idx].get('left_eye')[1]
+                y2 = all_points_eye[idx].get('right_eye')[1]
+                
+                if abs(y1 - y2) > 40:
+                    signal_person.append((idx, 'eye'))
+                    self.eye_tilt_detected = True
+        
+        # Анализ плеч
         for idx in range(len_all_points_shoulders):
-            if (all_points_shoulders[idx].get('left_shoulder') is not None and all_points_shoulders[idx].get('right_shoulder') is not None):
-                y1 = (all_points_shoulders[idx].get('left_shoulder')[1])
-                y2 = (all_points_shoulders[idx].get('right_shoulder')[1])
+            if (all_points_shoulders[idx].get('left_shoulder') is not None and 
+                all_points_shoulders[idx].get('right_shoulder') is not None):
                 
-                if (abs(y1 - y2)) > 40:
-                    signal_person.append((idx,'shoulder'))
+                y1 = all_points_shoulders[idx].get('left_shoulder')[1]
+                y2 = all_points_shoulders[idx].get('right_shoulder')[1]
+                
+                if abs(y1 - y2) > 40:
+                    signal_person.append((idx, 'shoulder'))
+                    self.shoulder_tilt_detected = True
+        
         return signal_person
     
+    def draw_tilt_lines(self, image, all_points_eye, all_points_shoulders):
+        """
+        Рисование линий между глазами и плечами с учетом наклона
+        """
+        # Рисуем линии для глаз
+        for person_eye in all_points_eye:
+            if self.eye_tilt_detected:
+                color = self.COLORS['red']  # Красный при наклоне
+            else:
+                color = self.COLORS['green']  # Зеленый в норме
+            self.draw_eye_line(image, person_eye, color)
+        
+        # Рисуем линии для плеч
+        for person_shoulders in all_points_shoulders:
+            if self.shoulder_tilt_detected:
+                color = self.COLORS['red']  # Красный при наклоне
+            else:
+                color = self.COLORS['green']  # Зеленый в норме
+            self.draw_shoulder_line(image, person_shoulders, color)
+    
     def signal(self, signal_person):
-        frequency = 250
-        duration = 1000
-        winsound.Beep(frequency, duration)
+        """
+        Звуковой сигнал при обнаружении наклона
+        """
+        if len(signal_person) > 0:
+            # Разные звуки для разных типов наклона
+            has_eye = any(tilt_type == 'eye' for _, tilt_type in signal_person)
+            has_shoulder = any(tilt_type == 'shoulder' for _, tilt_type in signal_person)
+            
+            if has_eye and has_shoulder:
+                frequency = 400
+                duration = 800
+            elif has_eye:
+                frequency = 500
+                duration = 500
+            elif has_shoulder:
+                frequency = 300
+                duration = 700
+            else:
+                frequency = 250
+                duration = 1000
+            
+            winsound.Beep(frequency, duration)
         return
 
     def draw_skeleton(self, image, keypoints, confs, pairs, color):
         """
         Рисование скелета по заданным парам ключевых точек
-        
-        Args:
-            image: Изображение для рисования
-            keypoints: Массив ключевых точек
-            confs: Массив уверенностей для точек
-            pairs: Список пар точек для соединения
-            color: Цвет линий
         """
         for (start, end) in pairs:
             if (confs[start] > self.confidence_threshold and 
@@ -135,28 +258,29 @@ class YOLOPoseDetector:
     def draw_keypoints(self, image, keypoints, confs):
         """
         Рисование ключевых точек с их номерами
-        
-        Args:
-            image: Изображение для рисования
-            keypoints: Массив ключевых точек
-            confs: Массив уверенностей для точек
         """
         for j, (point, point_conf) in enumerate(zip(keypoints, confs)):
             if point_conf > self.confidence_threshold:
                 x, y = int(point[0]), int(point[1])
                 if (x, y) != (0, 0):
-                    cv2.circle(image, (x, y), 5, self.COLORS['blue'], -1)
+                    # Выделяем глаза и плечи другим цветом
+                    if j in [3, 4]:  # Глаза
+                        color = self.COLORS['yellow']
+                        radius = 6
+                    elif j in [5, 6]:  # Плечи
+                        color = self.COLORS['yellow']
+                        radius = 6
+                    else:
+                        color = self.COLORS['blue']
+                        radius = 5
+                    
+                    cv2.circle(image, (x, y), radius, color, -1)
                     cv2.putText(image, str(j), (x + 5, y - 5), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.COLORS['blue'], 2)
     
     def draw_bounding_box(self, image, box, class_name):
         """
         Рисование ограничивающей рамки с названием класса
-        
-        Args:
-            image: Изображение для рисования
-            box: Координаты рамки [x1, y1, x2, y2]
-            class_name: Название класса
         """
         x1, y1, x2, y2 = box
         cv2.rectangle(image, (x1, y1), (x2, y2), self.COLORS['white'], 2)
@@ -166,22 +290,22 @@ class YOLOPoseDetector:
     def process_image(self, image, draw_boxes=False, save_result=False, show_result=False):
         """
         Обработка одного изображения
-        
-        Args:
-            image (numpy.ndarray): Изображение в формате BGR
-            draw_boxes (bool): Рисовать ли ограничивающие рамки
-            save_result (bool): Сохранять ли результат
-            show_result (bool): Показывать ли результат в окне
-            
-        Returns:
-            numpy.ndarray: Обработанное изображение или None в случае ошибки
         """
         if image is None:
             print("Ошибка: изображение не загружено")
             return None
         
-        # Обработка изображения с моделью (отключаем вывод)
+        # Обработка изображения с моделью
         results = self.model(image, verbose=False)[0]
+        
+        # Получаем точки для анализа
+        all_points_eye, all_points_shoulders = self.get_keypoints_by_indices(image)
+        
+        # Анализируем наклон
+        signal_person = self.analyze_slouch(all_points_eye, all_points_shoulders)
+        
+        # Рисуем линии между глазами и плечами
+        self.draw_tilt_lines(image, all_points_eye, all_points_shoulders)
         
         # Проверка на наличие обнаруженных объектов
         if (hasattr(results, 'boxes') and hasattr(results.boxes, 'cls') 
@@ -207,6 +331,14 @@ class YOLOPoseDetector:
                     self.draw_skeleton(image, kp, conf, self.SKELETON_PAIRS['arms'], self.COLORS['white'])
                     self.draw_skeleton(image, kp, conf, self.SKELETON_PAIRS['legs'], self.COLORS['red'])
                     self.draw_skeleton(image, kp, conf, self.SKELETON_PAIRS['body'], self.COLORS['blue'])
+        
+        # Добавляем статус на изображение
+        if self.eye_tilt_detected:
+            cv2.putText(image, "EYE TILT DETECTED!", (10, 60),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, self.COLORS['red'], 2)
+        if self.shoulder_tilt_detected:
+            cv2.putText(image, "SHOULDER TILT DETECTED!", (10, 90),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, self.COLORS['red'], 2)
         
         # Сохранение результатов
         if save_result:
