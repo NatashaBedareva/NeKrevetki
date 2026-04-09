@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import os
 import winsound
+import logging  # Добавлен импорт
 
 class YOLOPoseDetector:
     """
@@ -31,8 +32,14 @@ class YOLOPoseDetector:
             model_path (str): Путь к файлу модели YOLO
             confidence_threshold (float): Порог уверенности для отображения точек
         """
-        self.model = YOLO(model_path)
+        # Отключаем вывод YOLO
+        logging.getLogger('ultralytics').setLevel(logging.WARNING)
+        os.environ['YOLO_VERBOSE'] = 'False'
+        
+        # Загружаем модель с отключенным выводом
+        self.model = YOLO(model_path, verbose=False)
         self.confidence_threshold = confidence_threshold
+    
     def get_keypoints_by_indices(self, image, indices=[3,4,5,6]):
         """
         Получение координат указанных ключевых точек
@@ -40,12 +47,12 @@ class YOLOPoseDetector:
         Параметры:
             image: изображение
             indices: список индексов точек
-            draw: рисовать ли точки на изображении
         
         Возвращает:
             list: список словарей с координатами для каждого человека
         """
-        results = self.model(image)[0]
+        # Отключаем вывод для предсказания
+        results = self.model(image, verbose=False)[0]
         points_eye = []
         points_shoulders = []
         all_points_eye = []
@@ -75,12 +82,11 @@ class YOLOPoseDetector:
                 all_points_eye.append(person_eye)
                 all_points_shoulders.append(person_shoulders)
                 
-            return all_points_eye,all_points_shoulders
-                    
-                
+            return all_points_eye, all_points_shoulders
         
-        return  points_eye,points_shoulders
-    def analyze_slouch(self, all_points_eye,all_points_shoulders):
+        return points_eye, points_shoulders
+    
+    def analyze_slouch(self, all_points_eye, all_points_shoulders):
         len_all_points_eye = len(all_points_eye)
         len_all_points_shoulders = len(all_points_shoulders)
         signal_person = []
@@ -100,14 +106,12 @@ class YOLOPoseDetector:
                     signal_person.append((idx,'shoulder'))
         return signal_person
     
-    def signal(self,signal_person):
-        
+    def signal(self, signal_person):
         frequency = 250
         duration = 1000
         winsound.Beep(frequency, duration)
         return
 
- 
     def draw_skeleton(self, image, keypoints, confs, pairs, color):
         """
         Рисование скелета по заданным парам ключевых точек
@@ -176,8 +180,8 @@ class YOLOPoseDetector:
             print("Ошибка: изображение не загружено")
             return None
         
-        # Обработка изображения с помощью модели
-        results = self.model(image)[0]
+        # Обработка изображения с моделью (отключаем вывод)
+        results = self.model(image, verbose=False)[0]
         
         # Проверка на наличие обнаруженных объектов
         if (hasattr(results, 'boxes') and hasattr(results.boxes, 'cls') 
@@ -217,11 +221,13 @@ class YOLOPoseDetector:
             cv2.destroyAllWindows()
         
         return image
-    
-                
+
 
 if __name__ == "__main__":
- 
+    # Отключаем вывод YOLO глобально
+    logging.getLogger('ultralytics').setLevel(logging.ERROR)
+    os.environ['YOLO_VERBOSE'] = 'False'
+    
     detector = YOLOPoseDetector(model_path='yolov8n-pose.pt', confidence_threshold=0.5)
     
     image_path = 'image.png'
