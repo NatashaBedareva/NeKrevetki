@@ -25,10 +25,12 @@ if __name__ == '__main__':
     fps_res = 0
     
     # Ограничение FPS
-    target_fps = 15  # Желаемый FPS
-    frame_time = 1.0 / target_fps
+    process_interval = 1.0
     last_process_time = time.time()
-    
+    last_processing_image = None
+    slouch_start_time = 0
+    slouch_detected_count =0;
+    slouch_detected = False
     # Создаем детектор один раз перед циклом
     detector = YOLOPoseDetector(model_path='yolov8n-pose.pt', confidence_threshold=0.5)
 
@@ -42,49 +44,65 @@ if __name__ == '__main__':
             
         try:
             current_time = time.time()
-            
+            display_img = cv2.flip(img, 1)
             # Ограничение FPS - пропускаем кадры если обрабатываем слишком быстро
-            if current_time - last_process_time < frame_time:
-                # Пропускаем обработку, показываем оригинальный кадр
-                cv2.putText(img, f"FPS: {fps_res:.1f}", (10, 30), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.imshow('result', img)
-                
-                ch = cv2.waitKey(1)
-                if ch == 27:
-                    break
-                continue
+            if current_time - last_process_time >= process_interval:
             
-            last_process_time = current_time
+                last_process_time = current_time
             
-            frame_count += 1
-            if current_time - prev_time >= 1.0:
-               fps_res = frame_count / (current_time - prev_time)
-               frame_count = 0
-               prev_time = current_time
+            
                
-            img = cv2.flip(img, 1) 
+                img = cv2.flip(img, 1) 
             
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(img_rgb)
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(img_rgb)
 
-            processed_pil = advanced_preprocessing(pil_img)
+                processed_pil = advanced_preprocessing(pil_img)
             
-            processed_img = cv2.cvtColor(np.array(processed_pil), cv2.COLOR_RGB2BGR)
+                processed_img = cv2.cvtColor(np.array(processed_pil), cv2.COLOR_RGB2BGR)
 
-            # Обработка изображения детектором
-            detector.process_image(processed_img, draw_boxes=False)
+                # Обработка изображения детектором
+                detector.process_image(processed_img, draw_boxes=False)
 
-            all_points_eye, all_points_shoulders =detector.get_keypoints_by_indices(processed_img, indices=[3,4,5,6])
-            signal_person = detector.analyze_slouch(all_points_eye, all_points_shoulders)
-            if len(signal_person) != 0:
-                detector.signal(signal_person)
+                all_points_eye, all_points_shoulders =detector.get_keypoints_by_indices(processed_img, indices=[3,4,5,6])
+                signal_person = detector.analyze_slouch(all_points_eye, all_points_shoulders)
+                slouch_detected_count =0
+                if len(signal_person) != 0:
+   
+                    if not slouch_detected:
+       
+                        slouch_start_time = time.time()
+                        slouch_detected = True
+                        slouch_detected_count = 0
+       
+                    else:
+                        cur = time.time()
+                        elapsed = cur - slouch_start_time
+                        slouch_detected_count = 0
+                        if  cur - slouch_start_time >= 7:
+                            detector.signal(signal_person)
+                            slouch_start_time = 0
+                            slouch_detected = False
+                else:
+                
+                    slouch_detected_count += 1
+                    if slouch_detected_count == 3:
+                            slouch_start_time = 0
+                            slouch_detected = False
 
-            if fps_res > 0:
-                cv2.putText(processed_img, f"FPS: {fps_res:.1f}", (10, 30), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+                
+                    
+                
+
+                
+                last_processing_image= processed_img;
             
-            cv2.imshow('result', processed_img)
+                cv2.imshow('result', processed_img)
+            else :
+                if (last_processing_image is not None):
+                    cv2.imshow('result', last_processing_image)
+            
             
         except Exception as e:
             print(f"Произошла ошибка: {e}")
