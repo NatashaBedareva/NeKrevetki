@@ -179,7 +179,7 @@ class YOLOPoseDetector:
                 y1 = all_points_eye[idx].get('left_eye')[1]
                 y2 = all_points_eye[idx].get('right_eye')[1]
                 
-                if abs(y1 - y2) > 40:
+                if abs(y1 - y2) > 20:
                     signal_person.append((idx, 'eye'))
                     self.eye_tilt_detected = True
         
@@ -191,7 +191,7 @@ class YOLOPoseDetector:
                 y1 = all_points_shoulders[idx].get('left_shoulder')[1]
                 y2 = all_points_shoulders[idx].get('right_shoulder')[1]
                 
-                if abs(y1 - y2) > 40:
+                if abs(y1 - y2) > 20:
                     signal_person.append((idx, 'shoulder'))
                     self.shoulder_tilt_detected = True
         
