@@ -26,7 +26,7 @@
 | Компонент | Технологии |
 |-----------|-------------|
 | **Бэкенд / ML** | Python, OpenCV, MediaPipe, TensorFlow Lite, NumPy, Ultralytics YOLOv8 |
-| **Фронтенд** | flet |
+| **Фронтенд** | Tkinter |
 
 ### Используемые датасеты
 - COCO (ключевые точки человека)

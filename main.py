@@ -7,9 +7,25 @@ from PIL import Image, ImageTk, ImageEnhance
 import threading
 import os
 
+import sys
+
+
 # Импорт ваших модулей
 from video_capture import advanced_preprocessing
 from detect_point import YOLOPoseDetector
+
+
+def resource_path(relative_path):
+    """Получить абсолютный путь к файлу. Работает в разработке и в скомпилированном .exe"""
+    try:
+        # PyInstaller создает временную папку и хранит путь в _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Запущено как обычный скрипт
+        base_path = os.path.abspath(".")
+    
+    return os.path.join(base_path, relative_path)
+
 
 
 class VideoProcessorApp:
@@ -176,14 +192,17 @@ class VideoProcessorApp:
         
         # Инициализация детектора
         try:
+            # Получаем правильный путь к файлу модели
+            model_path = resource_path('yolov8n-pose.pt')
             self.detector = YOLOPoseDetector(
-                model_path='yolov8n-pose.pt', 
+                model_path=model_path, 
                 confidence_threshold=0.5
             )
         except Exception as e:
             self.status_label.config(text=f"Статус: Ошибка загрузки модели")
-            print(f"Ошибка загрузки модели: {e}")
-            self.cap.release()
+            print(f"Ошибка загрузки модели из {model_path}: {e}")
+            if self.cap:
+                self.cap.release()
             return
         
         # Сброс счетчиков времени
