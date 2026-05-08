@@ -28,6 +28,7 @@ def resource_path(relative_path):
 
 
 
+
 class VideoProcessorApp:
     def __init__(self, window):
         self.window = window
